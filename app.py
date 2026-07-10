@@ -68,7 +68,7 @@ IST = pytz.timezone("Asia/Kolkata")
 # ── Import modules ─────────────────────────────────────────────────────────────
 try:
     from modules.angelone_client import (
-        fetch_candle_data, fetch_options_chain, fetch_ltp,
+        fetch_candle_data, fetch_options_chain, fetch_ltp, fetch_ltp_info,
         get_next_weekly_expiry, get_expiry_string, get_expiry_countdown,
         is_market_open, get_atm_strike, get_strike_range, INTERVAL_MAP,
         is_connected, get_data_source, get_client, get_last_error,
@@ -1090,7 +1090,6 @@ def main():
         st.stop()
 
     # Fetch core data
-    from modules.angelone_client import fetch_ltp_info
     ltp_info = fetch_ltp_info()
     ltp = ltp_info["ltp"]
     if ltp and ltp > 0:

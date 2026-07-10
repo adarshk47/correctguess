@@ -19,6 +19,40 @@ IST = pytz.timezone("Asia/Kolkata")
 NIFTY_TOKEN = "99926000"
 NIFTY_EXCHANGE = "NSE"
 
+def fetch_ltp_info(token=NIFTY_TOKEN):
+    """
+    Fetch full LTP data for NIFTY 50, including previous close (for change calc).
+    Returns a dict with ltp, close, open, high, low.
+    """
+    obj = get_client()
+    default = {"ltp": 0.0, "close": 0.0, "open": 0.0, "high": 0.0, "low": 0.0}
+    if obj is None:
+        return default
+
+    try:
+        response = obj.ltpData(NIFTY_EXCHANGE, "NIFTY 50", token)
+        if response and response.get("status") and response.get("data"):
+            d = response["data"]
+            return {
+                "ltp": float(d.get("ltp", 0)),
+                "close": float(d.get("close", 0)),
+                "open": float(d.get("open", 0)),
+                "high": float(d.get("high", 0)),
+                "low": float(d.get("low", 0)),
+            }
+        # Fall back to candles
+        candles = fetch_candle_data(1, 2)
+        if not candles.empty:
+            last_close = float(candles["close"].iloc[-1])
+            return {**default, "ltp": last_close, "close": last_close}
+        return default
+    except Exception as e:
+        return default
+
+def fetch_ltp(token=NIFTY_TOKEN):
+    """Return only the LTP float."""
+    return fetch_ltp_info(token)["ltp"]
+
 INTERVAL_MAP = {
     1: "ONE_MINUTE",
     2: "TWO_MINUTE",
@@ -840,39 +874,5 @@ def _last_trading_day(ref: datetime) -> datetime:
 
 
 @st.cache_data(ttl=5)
-def fetch_ltp_info(token: str = NIFTY_TOKEN) -> dict:
-    """
-    Fetch full LTP data for NIFTY 50, including previous close (for change calc).
-    Returns a dict with ltp, close, open, high, low.
-    """
-    obj = get_client()
-    default = {"ltp": 0.0, "close": 0.0, "open": 0.0, "high": 0.0, "low": 0.0}
-    if obj is None:
-        return default
-
-    try:
-        response = obj.ltpData(NIFTY_EXCHANGE, "NIFTY 50", token)
-        if response and response.get("status") and response.get("data"):
-            d = response["data"]
-            return {
-                "ltp": float(d.get("ltp", 0)),
-                "close": float(d.get("close", 0)),
-                "open": float(d.get("open", 0)),
-                "high": float(d.get("high", 0)),
-                "low": float(d.get("low", 0)),
-            }
-        # Fall back to candles
-        candles = fetch_candle_data(1, 2)
-        if not candles.empty:
-            last_close = float(candles["close"].iloc[-1])
-            return {**default, "ltp": last_close, "close": last_close}
-        return default
-    except Exception as e:
-        logger.error(f"LTP fetch error: {e}")
-        return default
-
-
-@st.cache_data(ttl=5)
-def fetch_ltp(token: str = NIFTY_TOKEN) -> float:
-    """Return only the LTP float."""
-    return fetch_ltp_info(token)["ltp"]
+def fetch_ltp_wrapper(token=NIFTY_TOKEN):
+    return fetch_ltp(token)
