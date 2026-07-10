@@ -137,24 +137,16 @@ def add_paper_trade(signal, pattern_name: str, spot_price: float,
     entry_prem, sl_prem, target_prem = _premium_levels(
         signal, option_premium, option_delta, spot_price)
 
-    # In simulation, immediately resolve the trade.
+    # In simulation, we don't know the result yet.
     status = "OPEN"
     exit_price = None
     exit_time = None
     pnl = 0.0
     pnl_pct = 0.0
     if simulated:
-        rr = float(signal.risk_reward or 1.0)
-        if rr >= 1.5:
-            status = "PROFIT"
-            exit_price = target_prem
-        else:
-            status = "LOSS"
-            exit_price = sl_prem
-        pnl = round(exit_price - entry_prem, 2)
-        pnl_pct = round(pnl / entry_prem * 100, 2) if entry_prem else 0.0
-        exit_time = now.strftime("%H:%M:%S")
-
+        # Mark as simulated so we know it's not a real-time live trade
+        status = "OPEN (SIM)"
+    
     trade = {
         "id": trade_id,
         "time": now.strftime("%H:%M:%S"),
@@ -197,7 +189,7 @@ def update_paper_trades(current_spot: float):
     init_paper_trades()
     now = datetime.now(IST)
     for trade in st.session_state["paper_trades"]:
-        if trade["status"] != "OPEN":
+        if trade["status"] not in ("OPEN", "OPEN (SIM)"):
             continue
         if not current_spot:
             continue

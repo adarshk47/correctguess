@@ -152,7 +152,8 @@ def render_header(ltp: float, spot_prev: float, connected: bool):
     expiry_dt = get_next_weekly_expiry()
     expiry_str = get_expiry_string(expiry_dt)
     countdown = get_expiry_countdown(expiry_dt)
-    market_status = "🟢 MARKET OPEN" if is_market_open() else "🔴 MARKET CLOSED"
+    market_open = is_market_open()
+    market_status = "🟢 MARKET OPEN" if market_open else "🔴 MARKET CLOSED"
 
     # ── Connection status badge (top-right) ──────────────────────────────────
     if connected:
@@ -167,12 +168,19 @@ def render_header(ltp: float, spot_prev: float, connected: bool):
         f'<div style="display:flex;justify-content:flex-end;margin-bottom:6px;">{conn_html}</div>',
         unsafe_allow_html=True,
     )
-    chg = ltp - spot_prev
+    chg = ltp - spot_prev if ltp and spot_prev else 0
     chg_pct = chg / spot_prev * 100 if spot_prev else 0
     chg_color = "#00ff88" if chg >= 0 else "#ff4444"
     chg_sign = "+" if chg >= 0 else ""
     ltp_str = f"{ltp:,.2f}" if ltp else "---"
-    chg_str = f"{chg_sign}{chg:.2f} ({chg_sign}{chg_pct:.2f}%)" if ltp else "Connect to AngelOne"
+    
+    if ltp and spot_prev:
+        chg_str = f"{chg_sign}{chg:.2f} ({chg_sign}{chg_pct:.2f}%)"
+    elif connected:
+        chg_str = "Waiting for data..."
+    else:
+        chg_str = "Connect to AngelOne"
+        
     is_expiry_today = (expiry_dt is not None and expiry_dt.date() == now.date())
     expiry_day_str = "📅 TODAY!" if is_expiry_today else (
         expiry_dt.strftime("%A") if expiry_dt else "---")
@@ -186,11 +194,21 @@ def render_header(ltp: float, spot_prev: float, connected: bool):
             <div class="metric-sub" style="color:{chg_color if ltp else '#666'};">{chg_str}</div>
         </div>""", unsafe_allow_html=True)
     with col2:
+        if market_open:
+            time_label = "IST Time"
+            time_val = now.strftime('%H:%M:%S')
+            sub_text = now.strftime('%A, %d %b %Y')
+        else:
+            time_label = "Market Closed"
+            # Show the last tick time if we have it, otherwise just current time
+            time_val = "15:30:00"
+            sub_text = "Last Session: " + now.strftime('%d %b %Y')
+            
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">IST Time</div>
-            <div class="metric-value" style="font-size:18px;">{now.strftime('%H:%M:%S')}</div>
-            <div class="metric-sub">{now.strftime('%A, %d %b %Y')}</div>
+            <div class="metric-label">{time_label}</div>
+            <div class="metric-value" style="font-size:18px;">{time_val}</div>
+            <div class="metric-sub">{sub_text}</div>
         </div>""", unsafe_allow_html=True)
     with col3:
         st.markdown(f"""
@@ -603,8 +621,13 @@ def render_paper_trade_tab(patterns, spot: float, candle_df: pd.DataFrame = None
     st.caption("Sirf option **BUY** — bullish pe CE, bearish pe PE. "
                "Entry / SL / Target sab **option premium (₹)** mein, index level mein nahi.")
     market_open = is_market_open()
-    effective_spot = spot if spot and spot > 0 else st.session_state.get("_last_ltp", 22000.0)
-
+    
+    # Remove dummy fallback 22000.0. If spot is 0, we shouldn't trade.
+    effective_spot = spot if spot and spot > 0 else st.session_state.get("_last_ltp", 0.0)
+    
+    if effective_spot == 0:
+        st.warning("⚠️ Waiting for live Nifty spot price to enable paper trading...")
+        return
     # Tell the user whether premiums are REAL (from chain) or ESTIMATED (fallback)
     chain_ok = (options_df is not None and not options_df.empty
                 and (options_df.get("ce_ltp", pd.Series(dtype=float)).fillna(0).abs().sum()
@@ -1067,12 +1090,15 @@ def main():
         st.stop()
 
     # Fetch core data
-    ltp = fetch_ltp()
+    from modules.angelone_client import fetch_ltp_info
+    ltp_info = fetch_ltp_info()
+    ltp = ltp_info["ltp"]
     if ltp and ltp > 0:
         st.session_state["_last_ltp"] = ltp
     else:
         ltp = st.session_state.get("_last_ltp", 0.0)
-    spot_prev = ltp * 0.9985  # approximation for prev close display
+    
+    spot_prev = ltp_info["close"]
     connected = is_connected()
 
     # Timeframe selector for chart

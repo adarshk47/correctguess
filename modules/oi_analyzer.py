@@ -467,9 +467,9 @@ def compute_oi_delta_bars(df_candles: pd.DataFrame, options_df: pd.DataFrame) ->
     timestamps = df_candles["timestamp"].tolist()
     oi_values = []
 
-    np.random.seed(42)
     base_net_oi = net_oi
     for i, ts in enumerate(timestamps):
+        bar_net = base_net_oi
         if history:
             matching = [
                 e for e in history
@@ -478,13 +478,9 @@ def compute_oi_delta_bars(df_candles: pd.DataFrame, options_df: pd.DataFrame) ->
             if matching:
                 snap = matching[-1]["snapshot"]
                 bar_net = sum(v["pe_oi"] - v["ce_oi"] for v in snap.values())
-            else:
-                noise = np.random.normal(0, abs(base_net_oi) * 0.002 + 10000)
-                bar_net = base_net_oi + noise
-        else:
-            noise = np.random.normal(0, abs(base_net_oi) * 0.001 + 10000)
-            bar_net = base_net_oi + noise
-
+        
+        # Removed random noise generation as it produces 'dummy' data.
+        # If no history, we just show the base net OI.
         oi_values.append(bar_net)
 
     oi_df = pd.DataFrame({
@@ -493,6 +489,6 @@ def compute_oi_delta_bars(df_candles: pd.DataFrame, options_df: pd.DataFrame) ->
     })
     oi_df["delta_oi"] = oi_df["net_oi"].diff().fillna(0)
     oi_df["color"] = oi_df["delta_oi"].apply(
-        lambda x: "#00ff88" if x < 0 else "#ff4444"
+        lambda x: "#00ff88" if x > 0 else "#ff4444"
     )
     return oi_df
