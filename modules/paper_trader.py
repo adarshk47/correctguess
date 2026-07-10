@@ -48,14 +48,24 @@ def get_atm_option_quote(options_df, spot_price: float, option_type: str,
     try:
         if options_df is None or options_df.empty or not spot_price:
             return 0.0, 0.0
-        atm = round(spot_price / 50) * 50
+        
+        # Use idx_entry (the spot price at the time the pattern formed) to find 
+        # which strike WAS at-the-money then.
+        reference_spot = idx_entry if idx_entry is not None else spot_price
+        atm = round(reference_spot / 50) * 50
+        
         idx = (options_df["strike"] - atm).abs().idxmin()
         row = options_df.loc[idx]
         opt = option_type.lower()
         prem = float(row.get(f"{opt}_ltp", 0) or 0)
         delta = float(row.get(f"{opt}_delta", 0) or 0)
-        # Adjust for the spot level at pattern formation time
-        if idx_entry is not None and spot_price and delta and prem:
+        
+        # Adjust for the spot level at pattern formation time if it's different 
+        # from current spot. prem and delta are CURRENT values for that strike.
+        if idx_entry is not None and abs(idx_entry - spot_price) > 0.1 and delta and prem:
+            # Estimation: Entry Premium = Current Premium + Delta * (Entry Spot - Current Spot)
+            # For PE, delta is negative, so if Entry Spot < Current Spot, 
+            # Entry Premium = Current + (-delta) * (-diff) = Current + positive -> Correct.
             prem = prem + delta * (idx_entry - spot_price)
             prem = max(round(prem, 2), 0.05)
         return prem, delta
