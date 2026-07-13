@@ -608,7 +608,7 @@ def render_strike_volume_tab(options_df: pd.DataFrame, spot: float, candle_data_
 
         st.dataframe(
             strike_df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     else:
@@ -722,7 +722,7 @@ def render_paper_trade_tab(patterns, spot: float, candle_df: pd.DataFrame = None
     table_df = df[available].rename(columns=premium_labels)
     status_subset = ["status"] if "status" in table_df.columns else []
     styled = style_cells(table_df.style, style_status, status_subset)
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    st.dataframe(styled, width='stretch', hide_index=True)
 
     # ── Detailed trade cards ─────────────────────────────────────────────────
     st.markdown("#### 📑 Trade Details")
@@ -868,7 +868,7 @@ def render_oi_table_tab(candle_data_by_tf: dict, options_df: pd.DataFrame, spot:
 
     styled = style_cells(oi_table.style, style_trend, ["Trend"])
     styled = style_cells(styled, style_arrow, ["Arrow"])
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    st.dataframe(styled, width='stretch', hide_index=True)
 
     delta_info = compute_delta_oi(options_df, spot)
     bias = delta_info.get("bias", "NEUTRAL")
@@ -924,7 +924,7 @@ def render_greeks_tab(options_df: pd.DataFrame, spot: float):
 
     st.markdown("#### Greeks by Strike (ATM ±5)")
     if not table.empty:
-        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.dataframe(table, width='stretch', hide_index=True)
 
     st.markdown("#### Premium Trend Analysis")
     trend_table = build_greeks_trend_table(options_df, spot)
@@ -937,12 +937,12 @@ def render_greeks_tab(options_df: pd.DataFrame, spot: float):
             return ""
 
         styled = style_cells(trend_table.style, style_signal, ["Signal"])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        st.dataframe(styled, width='stretch', hide_index=True)
 
     st.markdown("#### Gamma Exposure (GEX)")
     gex_df = get_gamma_exposure(options_df, spot)
     if not gex_df.empty:
-        st.dataframe(gex_df, use_container_width=True, hide_index=True)
+        st.dataframe(gex_df, width='stretch', hide_index=True)
 
 
 def render_best_trade_tab(patterns, options_df: pd.DataFrame, spot: float, oi_delta: dict, greeks: dict):
@@ -1118,9 +1118,12 @@ def main():
     candle_df = fetch_candle_data(selected_tf, 500)
     candle_df = filter_to_recent_data(candle_df, days=2)
 
-    # Fetch data for all timeframes (for OI table)
+    # Fetch data for all timeframes (for OI table) - increased cache time
     candle_data_by_tf = {}
     for tf in [1, 2, 5, 10, 15, 30, 60]:
+        # Small delay to prevent rate limit
+        if tf != selected_tf:
+            time.sleep(0.05)
         candle_data_by_tf[tf] = fetch_candle_data(tf, 80)
 
     # Fetch options chain
@@ -1160,7 +1163,7 @@ def main():
     # Build and render chart (Now at the TOP as requested)
     with st.spinner(""):
         fig = build_chart(candle_df, patterns, oi_annotations, selected_tf)
-        st.plotly_chart(fig, use_container_width=True, config={
+        st.plotly_chart(fig, width='stretch', config={
             "displayModeBar": True,
             "displaylogo": False,
             "modeBarButtonsToRemove": ["pan2d", "lasso2d"],
