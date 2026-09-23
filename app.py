@@ -121,13 +121,13 @@ def color_bias(bias: str) -> str:
     return "neutral"
 
 
-def filter_to_latest_day(df: pd.DataFrame) -> pd.DataFrame:
-    """Keep only the most recent trading day's candles (intraday view)."""
+def filter_to_recent_data(df: pd.DataFrame, days: int = 2) -> pd.DataFrame:
+    """Keep the last few trading days' candles for better context."""
     if df is None or df.empty:
         return df
     ts = pd.to_datetime(df["timestamp"])
-    last_date = ts.iloc[-1].date()
-    mask = ts.dt.date == last_date
+    last_dates = sorted(ts.dt.date.unique())[-days:]
+    mask = ts.dt.date.isin(last_dates)
     return df[mask].reset_index(drop=True)
 
 
@@ -677,12 +677,34 @@ def render_paper_trade_tab(patterns, spot: float, candle_df: pd.DataFrame = None
         st.info("Waiting for pattern signals to initiate paper trades...")
         return
 
-    # ── Detailed trade cards (what trade was taken, entry/exit, outcome) ──────
+    # ── All Trades Table (Now at the top of the tab) ─────────────────────────
+    st.markdown("#### 📋 All Trades Table")
+
+    def style_status(val):
+        if val == "PROFIT":
+            return "background-color: #1a3a1a; color: #00ff88"
+        elif val == "LOSS":
+            return "background-color: #3a1a1a; color: #ff4444"
+        elif val == "OPEN":
+            return "background-color: #1a1a3a; color: #aaaaff"
+        return ""
+
+    display_cols = ["id", "time", "pattern", "signal", "option", "entry", "stop_loss",
+                    "target", "rr", "status", "exit_price", "exit_time", "pnl", "confidence"]
+    available = [c for c in display_cols if c in df.columns]
+    premium_labels = {
+        "entry": "entry ₹", "stop_loss": "SL ₹", "target": "target ₹",
+        "exit_price": "exit ₹", "pnl": "P&L ₹",
+    }
+    table_df = df[available].rename(columns=premium_labels)
+    status_subset = ["status"] if "status" in table_df.columns else []
+    styled = style_cells(table_df.style, style_status, status_subset)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    # ── Detailed trade cards ─────────────────────────────────────────────────
     st.markdown("#### 📑 Trade Details")
     for trade in reversed(st.session_state["paper_trades"][-12:]):
         status = trade["status"]
-        # Always a BUY; colour the card by the underlying bias (CE=bullish/green,
-        # PE=bearish/red) so direction is still readable at a glance.
         is_bullish = trade.get("direction", "BUY") == "BUY"
         sig_color = "#00ff88" if is_bullish else "#ff4444"
         if status == "PROFIT":
@@ -721,32 +743,6 @@ def render_paper_trade_tab(patterns, spot: float, candle_df: pd.DataFrame = None
             <div style="font-size:13px;color:#ccc;margin-top:4px;">{exit_info}</div>
         </div>
         """, unsafe_allow_html=True)
-
-    st.markdown("#### 📋 All Trades Table")
-
-    # Style table
-    def style_status(val):
-        if val == "PROFIT":
-            return "background-color: #1a3a1a; color: #00ff88"
-        elif val == "LOSS":
-            return "background-color: #3a1a1a; color: #ff4444"
-        elif val == "OPEN":
-            return "background-color: #1a1a3a; color: #aaaaff"
-        return ""
-
-    display_cols = ["id", "time", "pattern", "signal", "option", "entry", "stop_loss",
-                    "target", "rr", "status", "exit_price", "exit_time", "pnl", "confidence"]
-    available = [c for c in display_cols if c in df.columns]
-    # Premium-space columns get a ₹ label so it's clear these are option prices,
-    # not index levels.
-    premium_labels = {
-        "entry": "entry ₹", "stop_loss": "SL ₹", "target": "target ₹",
-        "exit_price": "exit ₹", "pnl": "P&L ₹",
-    }
-    table_df = df[available].rename(columns=premium_labels)
-    status_subset = ["status"] if "status" in table_df.columns else []
-    styled = style_cells(table_df.style, style_status, status_subset)
-    st.dataframe(styled, use_container_width=True, hide_index=True)
 
     if st.button("🗑️ Clear Paper Trades", key="clear_paper"):
         clear_all_trades()
@@ -1079,9 +1075,6 @@ def main():
     spot_prev = ltp * 0.9985  # approximation for prev close display
     connected = is_connected()
 
-    render_header(ltp, spot_prev, connected)
-    render_connect_panel(connected)
-
     # Timeframe selector for chart
     tf_options = {1: "1 min", 2: "2 min", 5: "5 min", 10: "10 min",
                   15: "15 min", 30: "30 min", 60: "60 min"}
@@ -1096,9 +1089,9 @@ def main():
             key="chart_tf_radio",
         )
 
-    # Fetch candle data for selected TF, then keep only the latest trading day
-    candle_df = fetch_candle_data(selected_tf, 200)
-    candle_df = filter_to_latest_day(candle_df)
+    # Fetch candle data for selected TF, then keep recent context
+    candle_df = fetch_candle_data(selected_tf, 500)
+    candle_df = filter_to_recent_data(candle_df, days=2)
 
     # Fetch data for all timeframes (for OI table)
     candle_data_by_tf = {}
@@ -1110,27 +1103,6 @@ def main():
     expiry_str = get_expiry_string(expiry_dt)
     options_df = fetch_options_chain(expiry_str)
 
-    # ── Debug expander (auto-opens when the chain is empty so we can diagnose) ─
-    expiry_src = st.session_state.get("_expiry_source", "unknown")
-    opt_rows = len(options_df) if options_df is not None and not options_df.empty else 0
-    chain_src = st.session_state.get("_chain_source", "?")
-    with st.expander(f"🔍 Data Status — Expiry: {expiry_str} | Option strikes: {opt_rows} | Source: {chain_src}",
-                     expanded=(opt_rows == 0)):
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Expiry", expiry_str)
-        c2.metric("Expiry Source", expiry_src)
-        c3.metric("Option Strikes", opt_rows)
-        c4.metric("Chain Source", chain_src)
-        if opt_rows == 0:
-            st.error("⚠️ Options chain empty — OI / Greeks / Strike tabs blank ho rahe hain.")
-        else:
-            st.success(f"✅ Options chain loaded — {opt_rows} strikes")
-        # Run per-step diagnostics so we can see exactly which API fails
-        if st.button("🩺 Run full diagnostics", key="run_diag") or opt_rows == 0:
-            with st.spinner("Checking each AngelOne + NSE step…"):
-                diag = get_options_diagnostics(expiry_str)
-            st.json(diag)
-
     # Detect patterns
     patterns = []
     if candle_df is not None and not candle_df.empty:
@@ -1139,7 +1111,7 @@ def main():
         except Exception as e:
             st.warning(f"Pattern detection error: {e}")
 
-    # OI analysis — store a fresh snapshot every refresh so timeframe deltas build up
+    # OI analysis
     oi_delta = {}
     oi_annotations = []
     if options_df is not None and not options_df.empty:
@@ -1160,7 +1132,7 @@ def main():
         except Exception:
             pass
 
-    # Build and render chart
+    # Build and render chart (Now at the TOP as requested)
     with st.spinner(""):
         fig = build_chart(candle_df, patterns, oi_annotations, selected_tf)
         st.plotly_chart(fig, use_container_width=True, config={
@@ -1169,11 +1141,35 @@ def main():
             "modeBarButtonsToRemove": ["pan2d", "lasso2d"],
         })
 
+    # Header and Panel (Moved BELOW the chart)
+    render_header(ltp, spot_prev, connected)
+    render_connect_panel(connected)
+
+    # ── Debug expander ───────────────────────────────────────────────────────
+    expiry_src = st.session_state.get("_expiry_source", "unknown")
+    opt_rows = len(options_df) if options_df is not None and not options_df.empty else 0
+    chain_src = st.session_state.get("_chain_source", "?")
+    with st.expander(f"🔍 Data Status — Expiry: {expiry_str} | Option strikes: {opt_rows} | Source: {chain_src}",
+                     expanded=(opt_rows == 0)):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Expiry", expiry_str)
+        c2.metric("Expiry Source", expiry_src)
+        c3.metric("Option Strikes", opt_rows)
+        c4.metric("Chain Source", chain_src)
+        if opt_rows == 0:
+            st.error("⚠️ Options chain empty — OI / Greeks / Strike tabs blank ho rahe hain.")
+        else:
+            st.success(f"✅ Options chain loaded — {opt_rows} strikes")
+        if st.button("🩺 Run full diagnostics", key="run_diag") or opt_rows == 0:
+            with st.spinner("Checking each AngelOne + NSE step…"):
+                diag = get_options_diagnostics(expiry_str)
+            st.json(diag)
+
     # ── Tabs ─────────────────────────────────────────────────────────────────
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📝 Paper Trade",
         "📋 Recommendations",
         "🎯 Strike Volume",
-        "📝 Paper Trade",
         "📈 OI Trend",
         "📊 OI Table",
         "🔢 Greeks",
@@ -1181,13 +1177,13 @@ def main():
     ])
 
     with tab1:
-        render_recommendations_tab(patterns, ltp)
+        render_paper_trade_tab(patterns, ltp, candle_df, options_df)
 
     with tab2:
-        render_strike_volume_tab(options_df, ltp, candle_data_by_tf)
+        render_recommendations_tab(patterns, ltp)
 
     with tab3:
-        render_paper_trade_tab(patterns, ltp, candle_df, options_df)
+        render_strike_volume_tab(options_df, ltp, candle_data_by_tf)
 
     with tab4:
         render_oi_trend_tab(options_df, ltp)
